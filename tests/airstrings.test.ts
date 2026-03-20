@@ -7,12 +7,15 @@ import { encode as base64urlEncode } from '../src/security/base64url'
 import { MemoryStore } from '../src/storage/memory-store'
 import { StringBundle } from '../src/models/string-bundle'
 
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+}
+
 function makeConfig(overrides?: Partial<AirStringsConfig>): AirStringsConfig {
   return {
     projectId: 'proj_test12345678',
-    publicKeys: {},
+    publicKeys: [],
     locale: 'en',
-    baseURL: 'https://localhost:9999',
     store: new MemoryStore(),
     ...overrides,
   }
@@ -23,15 +26,20 @@ async function makeSignedBundleJSON(
   publicKey: Uint8Array,
   overrides?: Partial<StringBundle>,
 ): Promise<{ json: string; config: AirStringsConfig }> {
+  const publicKeyBase64 = toBase64(publicKey)
+
   const bundle: StringBundle = {
     format_version: 1,
     project_id: 'proj_test12345678',
     locale: 'en',
     revision: 1,
     created_at: '2026-02-25T14:30:00Z',
-    key_id: 'key_test_01',
+    key_id: publicKeyBase64,
     signature: '',
-    strings: { greeting: 'Hello!', farewell: 'Goodbye!' },
+    strings: {
+      greeting: { value: 'Hello!', format: 'text' },
+      farewell: { value: 'Goodbye!', format: 'text' },
+    },
     ...overrides,
   }
 
@@ -42,7 +50,7 @@ async function makeSignedBundleJSON(
   const signed = { ...bundle, signature: signatureBase64url }
   const store = new MemoryStore()
   const config = makeConfig({
-    publicKeys: { key_test_01: publicKey },
+    publicKeys: [publicKeyBase64],
     store,
   })
 
@@ -112,7 +120,7 @@ describe('AirStrings', () => {
 
     const store = new MemoryStore()
     const config = makeConfig({
-      publicKeys: { key_test_01: publicKey },
+      publicKeys: [toBase64(publicKey)],
       store,
     })
 
@@ -150,7 +158,7 @@ describe('AirStrings', () => {
 
     const store = new MemoryStore()
     const config = makeConfig({
-      publicKeys: { key_test_01: publicKey },
+      publicKeys: [toBase64(publicKey)],
       store,
     })
 
@@ -184,5 +192,104 @@ describe('AirStrings', () => {
       'visibilitychange',
       expect.any(Function),
     )
+  })
+
+  it('strings getter returns raw values (backward compat)', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, config } = await makeSignedBundleJSON(privateKey, publicKey, {
+      strings: {
+        hello: { value: 'Hello!', format: 'text' },
+        count: { value: '{n, plural, one {# item} other {# items}}', format: 'icu' },
+      },
+    })
+
+    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(config)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(airstrings.strings['hello']).toBe('Hello!')
+    expect(airstrings.strings['count']).toBe('{n, plural, one {# item} other {# items}}')
+    expect(airstrings.t('hello')).toBe('Hello!')
+    expect(airstrings.t('count')).toBe('{n, plural, one {# item} other {# items}}')
+  })
+
+  it('format() returns value as-is for text format', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, config } = await makeSignedBundleJSON(privateKey, publicKey, {
+      strings: {
+        hello: { value: 'Hello!', format: 'text' },
+      },
+    })
+
+    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(config)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(airstrings.format('hello')).toBe('Hello!')
+    expect(airstrings.format('hello', { unused: 'arg' })).toBe('Hello!')
+  })
+
+  it('format() formats ICU plural patterns', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, config } = await makeSignedBundleJSON(privateKey, publicKey, {
+      strings: {
+        'items.count': { value: '{count, plural, one {# item} other {# items}}', format: 'icu' },
+      },
+    })
+
+    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(config)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(airstrings.format('items.count', { count: 1 })).toBe('1 item')
+    expect(airstrings.format('items.count', { count: 5 })).toBe('5 items')
+  })
+
+  it('format() formats ICU select patterns', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, config } = await makeSignedBundleJSON(privateKey, publicKey, {
+      strings: {
+        status: { value: '{status, select, active {Active} inactive {Inactive} other {Unknown}}', format: 'icu' },
+      },
+    })
+
+    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(config)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(airstrings.format('status', { status: 'active' })).toBe('Active')
+    expect(airstrings.format('status', { status: 'inactive' })).toBe('Inactive')
+    expect(airstrings.format('status', { status: 'deleted' })).toBe('Unknown')
+  })
+
+  it('format() returns key name for missing key', () => {
+    const airstrings = new AirStrings(makeConfig())
+    expect(airstrings.format('missing.key', { count: 1 })).toBe('missing.key')
+  })
+
+  it('format() returns raw pattern on formatting failure', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, config } = await makeSignedBundleJSON(privateKey, publicKey, {
+      strings: {
+        bad: { value: '{count, plural, one {# item} other {# items}', format: 'icu' },
+      },
+    })
+
+    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(config)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // Malformed ICU pattern (missing closing brace) — should return raw value
+    expect(airstrings.format('bad', { count: 1 })).toBe('{count, plural, one {# item} other {# items}')
   })
 })

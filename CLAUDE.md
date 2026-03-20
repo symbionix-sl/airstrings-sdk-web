@@ -31,7 +31,7 @@ Inherited from the parent project — these override everything else:
 ```
 src/
 ├── airstrings.ts               # Public API — the only exported class
-├── airstrings-config.ts        # Init config (projectId, publicKeys, locale, baseURL)
+├── airstrings-config.ts        # Init config (projectId, publicKeys, locale)
 ├── airstrings-error.ts         # Public error types
 ├── types.ts                    # Shared internal type definitions
 ├── models/
@@ -173,6 +173,7 @@ These wrappers are 5-10 lines each. Separate `@airstrings/react`, `@airstrings/v
 - **No protocol abstractions for v1.** Concrete types everywhere, except `BundleStore` (needs interface for IndexedDB/memory swap). Protocol extraction happens when we need test doubles or multiple implementations.
 - **Errors are structured.** `AirStringsError` uses a discriminated union with `code` field for programmatic handling. Human-readable `message` for logging.
 - **Logging is opt-in.** No `console.log` in production code. Provide a `logger` option in config that accepts `(level, message, context) => void`. Default: no-op.
+- **Consistency and predictability.** Follow established patterns exactly so that AI agents (and humans) don't make mistakes or invent things. When a pattern exists, replicate it; don't improvise.
 
 ## Patterns to Avoid
 
@@ -191,4 +192,45 @@ These wrappers are 5-10 lines each. Separate `@airstrings/react`, `@airstrings/v
 
 **In v1:** Fetch, verify, cache, serve strings. One locale active at a time. Visibility-based refresh (document focus). ETag-based conditional requests. Key rotation via multiple configured public keys. IndexedDB cache with memory fallback.
 
-**Not in v1 (do not build):** Analytics/telemetry, ICU MessageFormat, plural/gender handling, Service Worker integration, push-triggered updates, multiple simultaneous locales, React/Vue/Svelte wrapper packages, SSR string injection, server-driven locale negotiation, Web Worker offloading, bundle prefetching for multiple locales.
+**Not in v1 (do not build):** Analytics/telemetry, Service Worker integration, push-triggered updates, multiple simultaneous locales, React/Vue/Svelte wrapper packages, SSR string injection, server-driven locale negotiation, Web Worker offloading, bundle prefetching for multiple locales.
+
+## ICU MessageFormat Support
+
+Strings in the bundle now have a `format` field: `"text"` (plain) or `"icu"` (ICU MessageFormat).
+
+### Bundle format change
+
+String values in the bundle envelope changed from plain strings to objects:
+
+```json
+{
+  "strings": {
+    "welcome": { "value": "Welcome!", "format": "text" },
+    "items.count": { "value": "{count, plural, one {# item} other {# items}}", "format": "icu" }
+  }
+}
+```
+
+This affects `string-bundle.ts` (type definitions), `canonical-json.ts` (signature serialization), and the `AirStrings` strings record.
+
+### API design
+
+- `strings` record and key lookup: return the **raw value** (plain text or ICU pattern). This preserves backward compatibility.
+- Add a new formatting method: `format(key: string, args: Record<string, unknown>): string` that:
+  - For `"text"` format: returns the value as-is (ignores args)
+  - For `"icu"` format: formats using `intl-messageformat` library and returns the formatted string
+  - On formatting failure: returns the raw pattern string (never throws)
+
+### Platform ICU runtime
+
+Use the `intl-messageformat` package from FormatJS. This is the standard ICU MessageFormat implementation for JavaScript. It supports all ICU features: plurals, selects, number/date/time formatting. Add it as a dependency alongside `@noble/ed25519`.
+
+### Canonical JSON update
+
+Each string in the canonical JSON is now an object with `"format"` and `"value"` keys (sorted lexicographically):
+
+```
+"key":{"format":"text","value":"Hello"}
+```
+
+Update `canonical-json.ts` to serialize string entries as `{"format":..., "value":...}` objects instead of bare strings.

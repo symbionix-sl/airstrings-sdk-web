@@ -1,11 +1,12 @@
-import { AirStringsConfig, DEFAULT_BASE_URL } from './airstrings-config'
+import { AirStringsConfig, CDN_BASE_URL } from './airstrings-config'
 import { AirStringsError, airStringsError } from './airstrings-error'
 import { Emitter } from './events/emitter'
-import { parseBundle } from './models/string-bundle'
+import { parseBundle, StringBundle, StringEntry } from './models/string-bundle'
 import { BundleFetcher } from './networking/bundle-fetcher'
 import { verifyBundle } from './security/bundle-verifier'
 import { BundleStore, createBundleStore } from './storage/bundle-store'
 import { Logger, noopLogger } from './types'
+import IntlMessageFormat from 'intl-messageformat'
 
 export interface AirStringsEvents {
   'strings:updated': { locale: string; revision: number }
@@ -21,6 +22,7 @@ export class AirStrings {
 
   private cachedETags = new Map<string, string>()
   private currentStrings: Readonly<Record<string, string>> = Object.freeze({})
+  private currentEntries: Readonly<Record<string, StringEntry>> = Object.freeze({})
   private currentRevision = 0
   private currentLocale: string
   private ready = false
@@ -30,7 +32,7 @@ export class AirStrings {
     this.config = config
     this.logger = config.logger ?? noopLogger
     this.currentLocale = config.locale
-    this.fetcher = new BundleFetcher(config.baseURL ?? DEFAULT_BASE_URL)
+    this.fetcher = new BundleFetcher(CDN_BASE_URL)
     this.store = createBundleStore(config.store)
 
     this.loadCachedBundle().then(() => {
@@ -41,10 +43,31 @@ export class AirStrings {
   }
 
   /**
-   * Returns the localized string for the given key, or the key itself as fallback.
+   * Returns the raw localized string for the given key, or the key itself as fallback.
    */
   t(key: string): string {
     return this.currentStrings[key] ?? key
+  }
+
+  /**
+   * Formats a localized string with the given arguments.
+   * For "text" format: returns the value as-is (ignores args).
+   * For "icu" format: formats using ICU MessageFormat and returns the result.
+   * On formatting failure: returns the raw pattern string (never throws).
+   * If the key is not found: returns the key name as fallback.
+   */
+  format(key: string, args: Record<string, unknown> = {}): string {
+    const entry = this.currentEntries[key]
+    if (!entry) return key
+
+    if (entry.format === 'text') return entry.value
+
+    try {
+      const msg = new IntlMessageFormat(entry.value, this.currentLocale)
+      return msg.format(args) as string
+    } catch {
+      return entry.value
+    }
   }
 
   get strings(): Readonly<Record<string, string>> {
@@ -81,17 +104,14 @@ export class AirStrings {
         if (error) {
           this.logger('error', `Cached bundle verification failed for ${bcp47}`, { code: error.code })
           await this.store.delete(this.config.projectId, bcp47)
-          this.currentStrings = Object.freeze({})
-          this.currentRevision = 0
+          this.clearStrings()
         } else {
-          this.currentStrings = Object.freeze({ ...bundle.strings })
-          this.currentRevision = bundle.revision
+          this.applyBundle(bundle)
           this.cachedETags.set(bcp47, cached.etag ?? '')
         }
       }
     } else {
-      this.currentStrings = Object.freeze({})
-      this.currentRevision = 0
+      this.clearStrings()
     }
 
     await this.refresh()
@@ -145,8 +165,7 @@ export class AirStrings {
 
       // Only apply if locale hasn't changed during fetch
       if (locale === this.currentLocale) {
-        this.currentStrings = Object.freeze({ ...bundle.strings })
-        this.currentRevision = bundle.revision
+        this.applyBundle(bundle)
         this.ready = true
         this.emitter.emit('strings:updated', { locale, revision: bundle.revision })
       }
@@ -184,10 +203,25 @@ export class AirStrings {
       return
     }
 
-    this.currentStrings = Object.freeze({ ...bundle.strings })
-    this.currentRevision = bundle.revision
+    this.applyBundle(bundle)
     this.ready = true
     this.cachedETags.set(this.currentLocale, cached.etag ?? '')
+  }
+
+  private applyBundle(bundle: StringBundle): void {
+    this.currentEntries = Object.freeze({ ...bundle.strings })
+    const values: Record<string, string> = {}
+    for (const key of Object.keys(bundle.strings)) {
+      values[key] = bundle.strings[key]!.value
+    }
+    this.currentStrings = Object.freeze(values)
+    this.currentRevision = bundle.revision
+  }
+
+  private clearStrings(): void {
+    this.currentStrings = Object.freeze({})
+    this.currentEntries = Object.freeze({})
+    this.currentRevision = 0
   }
 
   private observeVisibility(): void {
