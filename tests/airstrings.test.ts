@@ -115,6 +115,11 @@ describe('AirStrings', () => {
     const publicKey = await ed.getPublicKeyAsync(privateKey)
     const { json } = await makeSignedBundleJSON(privateKey, publicKey)
 
+    // Bootstrap response (returns CDN URL)
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
     fetchMock.mockResolvedValueOnce(new Response(json, {
       status: 200,
       headers: { ETag: '"rev:1"' },
@@ -152,6 +157,11 @@ describe('AirStrings', () => {
       revision: 3,
     })
 
+    // Bootstrap response
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
     // First fetch returns rev 5
     fetchMock.mockResolvedValueOnce(new Response(json5, {
       status: 200,

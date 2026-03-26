@@ -1,4 +1,4 @@
-import { AirStringsConfig, CDN_BASE_URL } from './airstrings-config'
+import { AirStringsConfig } from './airstrings-config'
 import { AirStringsError, airStringsError } from './airstrings-error'
 import { Emitter } from './events/emitter'
 import { parseBundle, StringBundle, StringEntry } from './models/string-bundle'
@@ -8,6 +8,9 @@ import { BundleStore, createBundleStore } from './storage/bundle-store'
 import { Logger, noopLogger } from './types'
 import IntlMessageFormat from 'intl-messageformat'
 
+const DEFAULT_CDN_URL = 'https://cdn.airstrings.com'
+const DEFAULT_API_URL = 'https://api.airstrings.com'
+
 export interface AirStringsEvents {
   'strings:updated': { locale: string; revision: number }
   'strings:error': { error: AirStringsError }
@@ -15,7 +18,7 @@ export interface AirStringsEvents {
 
 export class AirStrings {
   private readonly config: AirStringsConfig
-  private readonly fetcher: BundleFetcher
+  private fetcher: BundleFetcher | null = null
   private readonly store: BundleStore
   private readonly logger: Logger
   private readonly emitter = new Emitter<AirStringsEvents>()
@@ -32,10 +35,11 @@ export class AirStrings {
     this.config = config
     this.logger = config.logger ?? noopLogger
     this.currentLocale = config.locale
-    this.fetcher = new BundleFetcher(CDN_BASE_URL)
     this.store = createBundleStore(config.store)
 
-    this.loadCachedBundle().then(() => {
+    this.loadCachedBundle().then(async () => {
+      const cdnUrl = await this.bootstrap()
+      this.fetcher = new BundleFetcher(cdnUrl)
       this.refresh()
     })
 
@@ -118,6 +122,8 @@ export class AirStrings {
   }
 
   async refresh(): Promise<void> {
+    if (!this.fetcher) return
+
     const locale = this.currentLocale
 
     try {
@@ -185,6 +191,18 @@ export class AirStrings {
     if (this.visibilityCleanup) {
       this.visibilityCleanup()
       this.visibilityCleanup = null
+    }
+  }
+
+  private async bootstrap(): Promise<string> {
+    const apiBase = (this.config.apiBaseURL ?? DEFAULT_API_URL).replace(/\/$/, '')
+    try {
+      const res = await fetch(`${apiBase}/v1/sdk/bootstrap`)
+      if (!res.ok) return DEFAULT_CDN_URL
+      const json = await res.json() as { cdn_base_url?: string }
+      return json.cdn_base_url ?? DEFAULT_CDN_URL
+    } catch {
+      return DEFAULT_CDN_URL
     }
   }
 

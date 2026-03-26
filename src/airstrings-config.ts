@@ -7,8 +7,7 @@ export interface AirStringsConfig {
   readonly environmentId: string
   readonly publicKeys: readonly string[]
   readonly locale: string
+  readonly apiBaseURL?: string
   readonly logger?: Logger
   readonly store?: BundleStore
 }
-
-export const CDN_BASE_URL = 'https://cdn.airstrings.com'
