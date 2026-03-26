@@ -96,14 +96,14 @@ export class AirStrings {
   async setLocale(bcp47: string): Promise<void> {
     this.currentLocale = bcp47
 
-    const cached = await this.store.load(this.config.projectId, bcp47)
+    const cached = await this.store.load(this.config.projectId, this.config.environmentId, bcp47)
     if (cached) {
       const bundle = parseBundle(cached.json)
       if (bundle) {
         const error = await verifyBundle(bundle, this.config.publicKeys)
         if (error) {
           this.logger('error', `Cached bundle verification failed for ${bcp47}`, { code: error.code })
-          await this.store.delete(this.config.projectId, bcp47)
+          await this.store.delete(this.config.projectId, this.config.environmentId, bcp47)
           this.clearStrings()
         } else {
           this.applyBundle(bundle)
@@ -122,7 +122,9 @@ export class AirStrings {
 
     try {
       const result = await this.fetcher.fetch(
+        this.config.organizationId,
         this.config.projectId,
+        this.config.environmentId,
         locale,
         this.cachedETags.get(locale) ?? null,
         this.logger,
@@ -157,7 +159,7 @@ export class AirStrings {
         return
       }
 
-      await this.store.save(this.config.projectId, locale, {
+      await this.store.save(this.config.projectId, this.config.environmentId, locale, {
         json: result.json,
         etag: result.etag ?? null,
       })
@@ -171,7 +173,7 @@ export class AirStrings {
       }
     } catch {
       if (!this.ready) {
-        const cached = await this.store.load(this.config.projectId, locale)
+        const cached = await this.store.load(this.config.projectId, this.config.environmentId, locale)
         if (cached) {
           this.ready = true
         }
@@ -187,19 +189,19 @@ export class AirStrings {
   }
 
   private async loadCachedBundle(): Promise<void> {
-    const cached = await this.store.load(this.config.projectId, this.currentLocale)
+    const cached = await this.store.load(this.config.projectId, this.config.environmentId, this.currentLocale)
     if (!cached) return
 
     const bundle = parseBundle(cached.json)
     if (!bundle) {
-      await this.store.delete(this.config.projectId, this.currentLocale)
+      await this.store.delete(this.config.projectId, this.config.environmentId, this.currentLocale)
       return
     }
 
     const error = await verifyBundle(bundle, this.config.publicKeys)
     if (error) {
       this.logger('error', 'Cached bundle verification failed, clearing cache')
-      await this.store.delete(this.config.projectId, this.currentLocale)
+      await this.store.delete(this.config.projectId, this.config.environmentId, this.currentLocale)
       return
     }
 

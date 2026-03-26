@@ -13,7 +13,9 @@ function toBase64(bytes: Uint8Array): string {
 
 function makeConfig(overrides?: Partial<AirStringsConfig>): AirStringsConfig {
   return {
+    organizationId: 'org_test12345678',
     projectId: 'proj_test12345678',
+    environmentId: 'env_test12345678',
     publicKeys: [],
     locale: 'en',
     store: new MemoryStore(),
@@ -93,7 +95,7 @@ describe('AirStrings', () => {
     const { json, config } = await makeSignedBundleJSON(privateKey, publicKey)
 
     // Pre-populate the store
-    await config.store!.save('proj_test12345678', 'en', {
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', {
       json,
       etag: '"rev:1"',
     })
@@ -204,7 +206,7 @@ describe('AirStrings', () => {
       },
     })
 
-    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
 
     const airstrings = new AirStrings(config)
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -224,7 +226,7 @@ describe('AirStrings', () => {
       },
     })
 
-    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
 
     const airstrings = new AirStrings(config)
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -242,7 +244,7 @@ describe('AirStrings', () => {
       },
     })
 
-    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
 
     const airstrings = new AirStrings(config)
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -260,7 +262,7 @@ describe('AirStrings', () => {
       },
     })
 
-    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
 
     const airstrings = new AirStrings(config)
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -284,7 +286,7 @@ describe('AirStrings', () => {
       },
     })
 
-    await config.store!.save('proj_test12345678', 'en', { json, etag: null })
+    await config.store!.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
 
     const airstrings = new AirStrings(config)
     await new Promise(resolve => setTimeout(resolve, 100))

@@ -22,7 +22,7 @@ describe('BundleFetcher', () => {
       headers: { ETag: '"rev:42"' },
     }))
 
-    const result = await fetcher.fetch('proj_test', 'en', null, noopLogger)
+    const result = await fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', null, noopLogger)
     expect(result.status).toBe('success')
     expect(result.json).toBe(body)
     expect(result.etag).toBe('"rev:42"')
@@ -31,25 +31,25 @@ describe('BundleFetcher', () => {
   it('returns not_modified on 304', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }))
 
-    const result = await fetcher.fetch('proj_test', 'en', '"rev:42"', noopLogger)
+    const result = await fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', '"rev:42"', noopLogger)
     expect(result.status).toBe('not_modified')
   })
 
   it('sends If-None-Match header when etag provided', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }))
 
-    await fetcher.fetch('proj_test', 'en', '"rev:42"', noopLogger)
+    await fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', '"rev:42"', noopLogger)
 
     expect(fetchMock).toHaveBeenCalledOnce()
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://cdn.airstrings.com/v1/proj_test/en/bundle.json')
+    expect(url).toBe('https://cdn.airstrings.com/org_test12345678/proj_test/env_test12345678/en/bundle.json')
     expect((init.headers as Record<string, string>)['If-None-Match']).toBe('"rev:42"')
   })
 
   it('does not send If-None-Match when no etag', async () => {
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 }))
 
-    await fetcher.fetch('proj_test', 'en', null, noopLogger)
+    await fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', null, noopLogger)
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect((init.headers as Record<string, string>)['If-None-Match']).toBeUndefined()
@@ -59,7 +59,7 @@ describe('BundleFetcher', () => {
     fetchMock.mockRejectedValueOnce(new Error('Network failure'))
 
     await expect(
-      fetcher.fetch('proj_test', 'en', null, noopLogger),
+      fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', null, noopLogger),
     ).rejects.toThrow('Network failure')
   })
 
@@ -70,7 +70,7 @@ describe('BundleFetcher', () => {
     }))
 
     await expect(
-      fetcher.fetch('proj_test', 'en', null, noopLogger),
+      fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', null, noopLogger),
     ).rejects.toThrow('HTTP 404')
   })
 
@@ -79,7 +79,7 @@ describe('BundleFetcher', () => {
       status: 200,
     }))
 
-    const result = await fetcher.fetch('proj_test', 'en', null, noopLogger)
+    const result = await fetcher.fetch('org_test12345678', 'proj_test', 'env_test12345678', 'en', null, noopLogger)
     expect(result.status).toBe('success')
     expect(result.etag).toBeNull()
   })
