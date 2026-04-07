@@ -23,16 +23,16 @@ export class IdbStore implements BundleStore {
     return this.dbPromise
   }
 
-  private key(projectId: string, locale: string): string {
-    return `${projectId}:${locale}`
+  private key(projectId: string, environmentId: string, locale: string): string {
+    return `${projectId}:${environmentId}:${locale}`
   }
 
-  async load(projectId: string, locale: string): Promise<StoredBundle | null> {
+  async load(projectId: string, environmentId: string, locale: string): Promise<StoredBundle | null> {
     const db = await this.open()
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly')
       const store = tx.objectStore(STORE_NAME)
-      const request = store.get(this.key(projectId, locale))
+      const request = store.get(this.key(projectId, environmentId, locale))
       request.onsuccess = () => {
         const result: unknown = request.result
         if (result && typeof result === 'object' && 'json' in result) {
@@ -45,23 +45,23 @@ export class IdbStore implements BundleStore {
     })
   }
 
-  async save(projectId: string, locale: string, bundle: StoredBundle): Promise<void> {
+  async save(projectId: string, environmentId: string, locale: string, bundle: StoredBundle): Promise<void> {
     const db = await this.open()
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
-      const request = store.put(bundle, this.key(projectId, locale))
+      const request = store.put(bundle, this.key(projectId, environmentId, locale))
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })
   }
 
-  async delete(projectId: string, locale: string): Promise<void> {
+  async delete(projectId: string, environmentId: string, locale: string): Promise<void> {
     const db = await this.open()
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
-      const request = store.delete(this.key(projectId, locale))
+      const request = store.delete(this.key(projectId, environmentId, locale))
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     })

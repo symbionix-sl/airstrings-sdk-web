@@ -7,9 +7,9 @@ export interface StoredBundle {
 }
 
 export interface BundleStore {
-  load(projectId: string, locale: string): Promise<StoredBundle | null>
-  save(projectId: string, locale: string, bundle: StoredBundle): Promise<void>
-  delete(projectId: string, locale: string): Promise<void>
+  load(projectId: string, environmentId: string, locale: string): Promise<StoredBundle | null>
+  save(projectId: string, environmentId: string, locale: string, bundle: StoredBundle): Promise<void>
+  delete(projectId: string, environmentId: string, locale: string): Promise<void>
 }
 
 export function createBundleStore(custom?: BundleStore): BundleStore {

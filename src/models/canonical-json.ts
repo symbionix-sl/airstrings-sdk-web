@@ -23,7 +23,8 @@ export function signedContent(bundle: StringBundle): Uint8Array {
   const sortedKeys = Object.keys(bundle.strings).sort()
   for (let i = 0; i < sortedKeys.length; i++) {
     if (i > 0) json += ','
-    json += escapeString(sortedKeys[i]!) + ':' + escapeString(bundle.strings[sortedKeys[i]!]!)
+    const entry = bundle.strings[sortedKeys[i]!]!
+    json += escapeString(sortedKeys[i]!) + ':{"format":' + escapeString(entry.format) + ',"value":' + escapeString(entry.value) + '}'
   }
 
   json += '}}'

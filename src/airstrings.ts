@@ -1,11 +1,15 @@
-import { AirStringsConfig, DEFAULT_BASE_URL } from './airstrings-config'
+import { AirStringsConfig } from './airstrings-config'
 import { AirStringsError, airStringsError } from './airstrings-error'
 import { Emitter } from './events/emitter'
-import { parseBundle } from './models/string-bundle'
+import { parseBundle, StringBundle, StringEntry } from './models/string-bundle'
 import { BundleFetcher } from './networking/bundle-fetcher'
 import { verifyBundle } from './security/bundle-verifier'
 import { BundleStore, createBundleStore } from './storage/bundle-store'
 import { Logger, noopLogger } from './types'
+import IntlMessageFormat from 'intl-messageformat'
+
+const DEFAULT_CDN_URL = 'https://cdn.airstrings.com'
+const DEFAULT_API_URL = 'https://api.airstrings.com'
 
 export interface AirStringsEvents {
   'strings:updated': { locale: string; revision: number }
@@ -14,13 +18,14 @@ export interface AirStringsEvents {
 
 export class AirStrings {
   private readonly config: AirStringsConfig
-  private readonly fetcher: BundleFetcher
+  private fetcher: BundleFetcher | null = null
   private readonly store: BundleStore
   private readonly logger: Logger
   private readonly emitter = new Emitter<AirStringsEvents>()
 
   private cachedETags = new Map<string, string>()
   private currentStrings: Readonly<Record<string, string>> = Object.freeze({})
+  private currentEntries: Readonly<Record<string, StringEntry>> = Object.freeze({})
   private currentRevision = 0
   private currentLocale: string
   private ready = false
@@ -30,10 +35,11 @@ export class AirStrings {
     this.config = config
     this.logger = config.logger ?? noopLogger
     this.currentLocale = config.locale
-    this.fetcher = new BundleFetcher(config.baseURL ?? DEFAULT_BASE_URL)
     this.store = createBundleStore(config.store)
 
-    this.loadCachedBundle().then(() => {
+    this.loadCachedBundle().then(async () => {
+      const cdnUrl = await this.bootstrap()
+      this.fetcher = new BundleFetcher(cdnUrl)
       this.refresh()
     })
 
@@ -41,10 +47,31 @@ export class AirStrings {
   }
 
   /**
-   * Returns the localized string for the given key, or the key itself as fallback.
+   * Returns the raw localized string for the given key, or the key itself as fallback.
    */
   t(key: string): string {
     return this.currentStrings[key] ?? key
+  }
+
+  /**
+   * Formats a localized string with the given arguments.
+   * For "text" format: returns the value as-is (ignores args).
+   * For "icu" format: formats using ICU MessageFormat and returns the result.
+   * On formatting failure: returns the raw pattern string (never throws).
+   * If the key is not found: returns the key name as fallback.
+   */
+  format(key: string, args: Record<string, unknown> = {}): string {
+    const entry = this.currentEntries[key]
+    if (!entry) return key
+
+    if (entry.format === 'text') return entry.value
+
+    try {
+      const msg = new IntlMessageFormat(entry.value, this.currentLocale)
+      return msg.format(args) as string
+    } catch {
+      return entry.value
+    }
   }
 
   get strings(): Readonly<Record<string, string>> {
@@ -73,36 +100,37 @@ export class AirStrings {
   async setLocale(bcp47: string): Promise<void> {
     this.currentLocale = bcp47
 
-    const cached = await this.store.load(this.config.projectId, bcp47)
+    const cached = await this.store.load(this.config.projectId, this.config.environmentId, bcp47)
     if (cached) {
       const bundle = parseBundle(cached.json)
       if (bundle) {
         const error = await verifyBundle(bundle, this.config.publicKeys)
         if (error) {
           this.logger('error', `Cached bundle verification failed for ${bcp47}`, { code: error.code })
-          await this.store.delete(this.config.projectId, bcp47)
-          this.currentStrings = Object.freeze({})
-          this.currentRevision = 0
+          await this.store.delete(this.config.projectId, this.config.environmentId, bcp47)
+          this.clearStrings()
         } else {
-          this.currentStrings = Object.freeze({ ...bundle.strings })
-          this.currentRevision = bundle.revision
+          this.applyBundle(bundle)
           this.cachedETags.set(bcp47, cached.etag ?? '')
         }
       }
     } else {
-      this.currentStrings = Object.freeze({})
-      this.currentRevision = 0
+      this.clearStrings()
     }
 
     await this.refresh()
   }
 
   async refresh(): Promise<void> {
+    if (!this.fetcher) return
+
     const locale = this.currentLocale
 
     try {
       const result = await this.fetcher.fetch(
+        this.config.organizationId,
         this.config.projectId,
+        this.config.environmentId,
         locale,
         this.cachedETags.get(locale) ?? null,
         this.logger,
@@ -137,7 +165,7 @@ export class AirStrings {
         return
       }
 
-      await this.store.save(this.config.projectId, locale, {
+      await this.store.save(this.config.projectId, this.config.environmentId, locale, {
         json: result.json,
         etag: result.etag ?? null,
       })
@@ -145,14 +173,13 @@ export class AirStrings {
 
       // Only apply if locale hasn't changed during fetch
       if (locale === this.currentLocale) {
-        this.currentStrings = Object.freeze({ ...bundle.strings })
-        this.currentRevision = bundle.revision
+        this.applyBundle(bundle)
         this.ready = true
         this.emitter.emit('strings:updated', { locale, revision: bundle.revision })
       }
     } catch {
       if (!this.ready) {
-        const cached = await this.store.load(this.config.projectId, locale)
+        const cached = await this.store.load(this.config.projectId, this.config.environmentId, locale)
         if (cached) {
           this.ready = true
         }
@@ -167,27 +194,54 @@ export class AirStrings {
     }
   }
 
+  private async bootstrap(): Promise<string> {
+    const apiBase = (this.config.apiBaseURL ?? DEFAULT_API_URL).replace(/\/$/, '')
+    try {
+      const res = await fetch(`${apiBase}/v1/sdk/bootstrap`)
+      if (!res.ok) return DEFAULT_CDN_URL
+      const json = await res.json() as { cdn_base_url?: string }
+      return json.cdn_base_url ?? DEFAULT_CDN_URL
+    } catch {
+      return DEFAULT_CDN_URL
+    }
+  }
+
   private async loadCachedBundle(): Promise<void> {
-    const cached = await this.store.load(this.config.projectId, this.currentLocale)
+    const cached = await this.store.load(this.config.projectId, this.config.environmentId, this.currentLocale)
     if (!cached) return
 
     const bundle = parseBundle(cached.json)
     if (!bundle) {
-      await this.store.delete(this.config.projectId, this.currentLocale)
+      await this.store.delete(this.config.projectId, this.config.environmentId, this.currentLocale)
       return
     }
 
     const error = await verifyBundle(bundle, this.config.publicKeys)
     if (error) {
       this.logger('error', 'Cached bundle verification failed, clearing cache')
-      await this.store.delete(this.config.projectId, this.currentLocale)
+      await this.store.delete(this.config.projectId, this.config.environmentId, this.currentLocale)
       return
     }
 
-    this.currentStrings = Object.freeze({ ...bundle.strings })
-    this.currentRevision = bundle.revision
+    this.applyBundle(bundle)
     this.ready = true
     this.cachedETags.set(this.currentLocale, cached.etag ?? '')
+  }
+
+  private applyBundle(bundle: StringBundle): void {
+    this.currentEntries = Object.freeze({ ...bundle.strings })
+    const values: Record<string, string> = {}
+    for (const key of Object.keys(bundle.strings)) {
+      values[key] = bundle.strings[key]!.value
+    }
+    this.currentStrings = Object.freeze(values)
+    this.currentRevision = bundle.revision
+  }
+
+  private clearStrings(): void {
+    this.currentStrings = Object.freeze({})
+    this.currentEntries = Object.freeze({})
+    this.currentRevision = 0
   }
 
   private observeVisibility(): void {

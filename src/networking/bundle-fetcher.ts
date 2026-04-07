@@ -16,12 +16,14 @@ export class BundleFetcher {
   }
 
   async fetch(
+    organizationId: string,
     projectId: string,
+    environmentId: string,
     locale: string,
     ifNoneMatch: string | null,
     logger: Logger,
   ): Promise<FetchResult> {
-    const url = `${this.baseURL}/v1/${projectId}/${locale}/bundle.json`
+    const url = `${this.baseURL}/${organizationId}/${projectId}/${environmentId}/${locale}/bundle.json`
     const headers: Record<string, string> = {}
     if (ifNoneMatch) {
       headers['If-None-Match'] = ifNoneMatch

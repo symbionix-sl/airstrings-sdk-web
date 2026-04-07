@@ -1,3 +1,10 @@
+export type StringFormat = 'text' | 'icu'
+
+export interface StringEntry {
+  readonly value: string
+  readonly format: StringFormat
+}
+
 export interface StringBundle {
   readonly format_version: number
   readonly project_id: string
@@ -6,7 +13,16 @@ export interface StringBundle {
   readonly created_at: string
   readonly key_id: string
   readonly signature: string
-  readonly strings: Readonly<Record<string, string>>
+  readonly strings: Readonly<Record<string, StringEntry>>
+}
+
+function isStringEntry(v: unknown): v is StringEntry {
+  if (typeof v !== 'object' || v === null) return false
+  const obj = v as Record<string, unknown>
+  return (
+    typeof obj['value'] === 'string' &&
+    (obj['format'] === 'text' || obj['format'] === 'icu')
+  )
 }
 
 export function parseBundle(json: string): StringBundle | null {
@@ -26,6 +42,10 @@ export function parseBundle(json: string): StringBundle | null {
       obj['strings'] === null
     ) {
       return null
+    }
+    const strings = obj['strings'] as Record<string, unknown>
+    for (const key of Object.keys(strings)) {
+      if (!isStringEntry(strings[key])) return null
     }
     return parsed as StringBundle
   } catch {
