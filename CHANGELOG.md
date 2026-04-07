@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-07
+
+### Changed
+- CI: switched npm publishing to Trusted Publishing (OIDC) — no long-lived tokens.
+- CI: bumped Node from 20 to 22 (current LTS).
+
 ## [0.1.0] - 2026-04-07
 
 ### Added
@@ -24,5 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dual ESM + CJS distribution with TypeScript declarations.
 - Node.js 18+ and modern browsers (ES2020+).
 
-[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/symbionix-sl/airstrings-sdk-web/releases/tag/v0.1.0

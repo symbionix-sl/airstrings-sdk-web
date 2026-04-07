@@ -1,6 +1,6 @@
 {
   "name": "@airstrings/web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AirStrings Web SDK — fetch, verify, cache, and serve Ed25519-signed localized string bundles",
   "keywords": [
     "airstrings",
