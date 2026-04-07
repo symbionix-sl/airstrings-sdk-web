@@ -2,6 +2,31 @@
   "name": "@airstrings/web",
   "version": "0.1.0",
   "description": "AirStrings Web SDK — fetch, verify, cache, and serve Ed25519-signed localized string bundles",
+  "keywords": [
+    "airstrings",
+    "i18n",
+    "l10n",
+    "localization",
+    "internationalization",
+    "icu",
+    "messageformat",
+    "ed25519",
+    "cdn",
+    "sdk"
+  ],
+  "author": "Symbionix <info@symbionix.io>",
+  "license": "MIT",
+  "homepage": "https://github.com/symbionix-sl/airstrings-sdk-web#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/symbionix-sl/airstrings-sdk-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/symbionix-sl/airstrings-sdk-web/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -24,6 +49,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -46,6 +72,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "license": "MIT"
+  }
 }
