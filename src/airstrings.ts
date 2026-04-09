@@ -30,6 +30,7 @@ export class AirStrings {
   private currentLocale: string
   private ready = false
   private visibilityCleanup: (() => void) | null = null
+  private readonly initPromise: Promise<void>
 
   constructor(config: AirStringsConfig) {
     this.config = config
@@ -37,13 +38,28 @@ export class AirStrings {
     this.currentLocale = config.locale
     this.store = createBundleStore(config.store)
 
-    this.loadCachedBundle().then(async () => {
-      const cdnUrl = await this.bootstrap()
-      this.fetcher = new BundleFetcher(cdnUrl)
-      this.refresh()
+    this.initPromise = this.init().catch((error) => {
+      const err = error instanceof Error ? error : new Error(String(error))
+      this.logger('error', `Initialization failed: ${err.message}`, { stack: err.stack })
     })
 
     this.observeVisibility()
+  }
+
+  private async init(): Promise<void> {
+    await this.loadCachedBundle()
+    const cdnUrl = await this.bootstrap()
+    this.fetcher = new BundleFetcher(cdnUrl)
+    await this.refresh()
+  }
+
+  /**
+   * Resolves once the initial load + bootstrap + first refresh cycle has
+   * completed (successfully or with a handled error). Safe to await from
+   * server-side callers that need deterministic readiness before use.
+   */
+  async whenReady(): Promise<void> {
+    await this.initPromise
   }
 
   /**
@@ -122,12 +138,19 @@ export class AirStrings {
   }
 
   async refresh(): Promise<void> {
-    if (!this.fetcher) return
+    if (!this.fetcher) {
+      // Belt + suspenders: callers that await refresh() right after constructing
+      // the instance would otherwise silently no-op because the fetcher is
+      // assigned inside the async init chain.
+      if (this.initPromise) await this.initPromise
+      if (!this.fetcher) return
+    }
 
+    const fetcher = this.fetcher
     const locale = this.currentLocale
 
     try {
-      const result = await this.fetcher.fetch(
+      const result = await fetcher.fetch(
         this.config.organizationId,
         this.config.projectId,
         this.config.environmentId,
@@ -177,7 +200,9 @@ export class AirStrings {
         this.ready = true
         this.emitter.emit('strings:updated', { locale, revision: bundle.revision })
       }
-    } catch {
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error))
+      this.logger('error', `Refresh failed for ${locale}: ${err.message}`, { stack: err.stack })
       if (!this.ready) {
         const cached = await this.store.load(this.config.projectId, this.config.environmentId, locale)
         if (cached) {
@@ -196,13 +221,22 @@ export class AirStrings {
 
   private async bootstrap(): Promise<string> {
     const apiBase = (this.config.apiBaseURL ?? DEFAULT_API_URL).replace(/\/$/, '')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
     try {
-      const res = await fetch(`${apiBase}/v1/sdk/bootstrap`)
-      if (!res.ok) return DEFAULT_CDN_URL
+      const res = await fetch(`${apiBase}/v1/sdk/bootstrap`, { signal: controller.signal })
+      if (!res.ok) {
+        this.logger('warn', `Bootstrap returned non-OK status ${res.status}, using default CDN`)
+        return DEFAULT_CDN_URL
+      }
       const json = await res.json() as { cdn_base_url?: string }
       return json.cdn_base_url ?? DEFAULT_CDN_URL
-    } catch {
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error))
+      this.logger('error', `Bootstrap failed: ${err.message}`, { stack: err.stack })
       return DEFAULT_CDN_URL
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 

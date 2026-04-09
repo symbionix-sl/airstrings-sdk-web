@@ -287,6 +287,105 @@ describe('AirStrings', () => {
     expect(airstrings.format('missing.key', { count: 1 })).toBe('missing.key')
   })
 
+  it('whenReady resolves after init + initial refresh (guards race)', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json } = await makeSignedBundleJSON(privateKey, publicKey)
+
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    fetchMock.mockResolvedValueOnce(new Response(json, {
+      status: 200,
+      headers: { ETag: '"rev:1"' },
+    }))
+
+    const airstrings = new AirStrings(makeConfig({
+      publicKeys: [toBase64(publicKey)],
+      store: new MemoryStore(),
+    }))
+
+    await airstrings.whenReady()
+
+    expect(airstrings.isReady).toBe(true)
+    expect(airstrings.t('greeting')).toBe('Hello!')
+    expect(airstrings.revision).toBe(1)
+  })
+
+  it('logs error when bundle fetch returns 500', async () => {
+    // Bootstrap OK, bundle fetch returns 500
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 500 }))
+
+    const logger = vi.fn()
+    const airstrings = new AirStrings(makeConfig({ logger }))
+    await airstrings.whenReady()
+
+    const errorCalls = logger.mock.calls.filter((c) => c[0] === 'error')
+    expect(errorCalls.length).toBeGreaterThanOrEqual(1)
+    expect(errorCalls.some((c) => /Refresh failed/.test(String(c[1])))).toBe(true)
+  })
+
+  it('logs error when bootstrap aborts via timeout', async () => {
+    // Bootstrap hangs until the AbortController signal fires
+    fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        }
+      })
+    })
+
+    const logger = vi.fn()
+    vi.useFakeTimers()
+    try {
+      const airstrings = new AirStrings(makeConfig({ logger }))
+      // Advance past the 30s bootstrap timeout
+      await vi.advanceTimersByTimeAsync(30000)
+      vi.useRealTimers()
+      await airstrings.whenReady()
+
+      const errorCalls = logger.mock.calls.filter((c) => c[0] === 'error')
+      expect(errorCalls.some((c) => /Bootstrap failed/.test(String(c[1])))).toBe(true)
+    } finally {
+      if (vi.isFakeTimers()) vi.useRealTimers()
+    }
+  })
+
+  it('logs error when cached bundle has wrong key_id', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json } = await makeSignedBundleJSON(privateKey, publicKey)
+
+    // Configure with a DIFFERENT public key so cache verification fails
+    const otherPriv = ed.utils.randomPrivateKey()
+    const otherPub = await ed.getPublicKeyAsync(otherPriv)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', {
+      json,
+      etag: '"rev:1"',
+    })
+
+    const logger = vi.fn()
+    const airstrings = new AirStrings(makeConfig({
+      publicKeys: [toBase64(otherPub)],
+      store,
+      logger,
+    }))
+    await airstrings.whenReady()
+
+    const errorCalls = logger.mock.calls.filter((c) => c[0] === 'error')
+    expect(errorCalls.some((c) => /verification failed/i.test(String(c[1])))).toBe(true)
+  })
+
   it('format() returns raw pattern on formatting failure', async () => {
     const privateKey = ed.utils.randomPrivateKey()
     const publicKey = await ed.getPublicKeyAsync(privateKey)
