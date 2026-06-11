@@ -39,7 +39,7 @@ const airstrings = new AirStrings({
   organizationId: 'org_xxx',
   projectId: 'proj_xxx',
   environmentId: 'env_xxx',
-  publicKeys: ['BASE64URL_ED25519_PUBLIC_KEY'],
+  publicKeys: ['BASE64_ED25519_PUBLIC_KEY'],
   locale: 'en',
 })
 
@@ -64,7 +64,7 @@ const airstrings = new AirStrings({
   organizationId: 'org_xxx',
   projectId: 'proj_xxx',
   environmentId: 'env_xxx',
-  publicKeys: ['BASE64URL_ED25519_PUBLIC_KEY'],
+  publicKeys: ['BASE64_ED25519_PUBLIC_KEY'],
   locale: navigator.language,
 })
 
@@ -124,7 +124,7 @@ Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a
 | `organizationId` | `string`                   | yes      | Your AirStrings organization id. |
 | `projectId`      | `string`                   | yes      | Project id. |
 | `environmentId`  | `string`                   | yes      | Environment id (e.g. production, staging). |
-| `publicKeys`     | `readonly string[]`        | yes      | One or more base64url-encoded Ed25519 public keys. Multiple keys supported for rotation. |
+| `publicKeys`     | `readonly string[]`        | yes      | One or more standard-base64-encoded Ed25519 public keys, exactly as shown in the dashboard (the bundle's `key_id` must match verbatim). Multiple keys supported for rotation. |
 | `locale`         | `string`                   | yes      | Initial BCP-47 locale (e.g. `"en"`, `"fr-CA"`). |
 | `apiBaseURL`     | `string`                   | no       | Override the API base URL (defaults to `https://api.airstrings.com`). |
 | `logger`         | `(level, msg, ctx) => void`| no       | Optional logger. Default: no-op. |
