@@ -78,6 +78,43 @@ In the browser, bundles are cached in IndexedDB and the SDK automatically refres
 
 ---
 
+## Bundled fallback (offline-safe builds)
+
+Ship published, signed bundles inside your app so a cold start with no network — SSG/SSR builds, first launch offline, CI — serves real strings instead of key names. Two steps:
+
+1. Pull the published bundles for your environment:
+
+   ```bash
+   airstrings bundles pull
+   ```
+
+2. Commit the resulting `airstrings/bundles/` seed directory to your repo.
+
+**Node / SSG / SSR — zero config.** The SDK probes `<cwd>/airstrings/bundles/` automatically and seeds from it when present. Override the seed directory with `seedDir: '/path/to/airstrings/bundles'`, or disable seeding entirely with `seedDir: false`.
+
+**Browser — pass bundles via `seed`.** Browsers have no filesystem, so import the committed files at build time and hand them to the SDK:
+
+```ts
+import { AirStrings } from '@airstrings/web'
+import enBundle from './airstrings/bundles/en-US.json'
+import jaBundle from './airstrings/bundles/ja.json'
+
+const airstrings = new AirStrings({
+  organizationId: 'org_xxx',
+  projectId: 'proj_xxx',
+  environmentId: 'env_xxx',
+  publicKeys: ['BASE64_ED25519_PUBLIC_KEY'],
+  locale: 'en-US',
+  seed: [enBundle, jaBundle],
+})
+```
+
+Seed bundles are untrusted input: every candidate runs the full Ed25519 verification pipeline, plus `project_id` and locale checks. The highest verified revision wins between cache and seed (ties go to the cache), a winning seed is persisted to the cache, and the network refresh still runs in the background afterwards. A tampered or mismatched seed is rejected with a `strings:error` event and never cached; a missing seed directory or file is a silent no-op.
+
+Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a pre-release step. See the bundled fallback contract (`docs/contracts/bundled-fallback.md` in the AirStrings docs) for the full specification.
+
+---
+
 ## API
 
 ### `new AirStrings(config)`
@@ -92,6 +129,8 @@ In the browser, bundles are cached in IndexedDB and the SDK automatically refres
 | `apiBaseURL`     | `string`                   | no       | Override the API base URL (defaults to `https://api.airstrings.com`). |
 | `logger`         | `(level, msg, ctx) => void`| no       | Optional logger. Default: no-op. |
 | `store`          | `BundleStore`              | no       | Inject a custom cache backend. |
+| `seed`           | `readonly unknown[]`       | no       | Bundled fallback contents supplied at build time (parsed objects or raw JSON strings). |
+| `seedDir`        | `string \| false`          | no       | Node only. Seed directory override, or `false` to disable seeding. Default: probe `<cwd>/airstrings/bundles/`. |
 
 ### Methods
 

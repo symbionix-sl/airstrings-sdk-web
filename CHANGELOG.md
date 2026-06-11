@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+### Added
+- Bundled fallback (seed): the SDK can serve published, signed bundles committed into the app repo, so cold starts with no network render real strings instead of key names (bundled-fallback contract v1).
+- `seed` config option: pre-loaded bundle contents (parsed objects or raw JSON strings) supplied at build time — the browser path, no filesystem access.
+- `seedDir` config option (Node only): seed directory override, or `false` to disable seeding entirely. When neither `seed` nor `seedDir` is given, Node builds probe `<cwd>/airstrings/bundles/` automatically.
+- Every seed candidate runs the full verification pipeline (key_id lookup, Ed25519 signature, format_version), plus `project_id` and locale checks. Invalid seeds are rejected with `strings:error` and never cached.
+- New error codes: `SEED_PROJECT_MISMATCH`, `SEED_LOCALE_MISMATCH`.
+- Anti-downgrade extended to a three-way race between cache, seed, and network: highest verified revision wins; ties go to the cache; a winning seed is persisted through the normal cache-write path.
+
 ## [0.1.1] - 2026-04-07
 
 ### Changed
@@ -30,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dual ESM + CJS distribution with TypeScript declarations.
 - Node.js 18+ and modern browsers (ES2020+).
 
-[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.2...v0.3.0
 [0.1.1]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/symbionix-sl/airstrings-sdk-web/releases/tag/v0.1.0

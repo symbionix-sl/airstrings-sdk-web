@@ -10,4 +10,6 @@ export interface AirStringsConfig {
   readonly apiBaseURL?: string
   readonly logger?: Logger
   readonly store?: BundleStore
+  readonly seed?: readonly unknown[]
+  readonly seedDir?: string | false
 }

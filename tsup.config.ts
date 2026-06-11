@@ -7,6 +7,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2020',
+  external: ['node:fs/promises', 'node:path'],
   outExtension({ format }) {
     return {
       js: format === 'esm' ? '.mjs' : '.cjs',

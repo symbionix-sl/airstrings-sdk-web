@@ -6,6 +6,8 @@ export type AirStringsErrorCode =
   | 'INVALID_KEY_ID_ENCODING'
   | 'BUNDLE_DECODE_FAILED'
   | 'NETWORK_ERROR'
+  | 'SEED_PROJECT_MISMATCH'
+  | 'SEED_LOCALE_MISMATCH'
 
 export interface AirStringsError {
   readonly code: AirStringsErrorCode

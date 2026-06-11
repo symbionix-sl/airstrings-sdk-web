@@ -5,6 +5,7 @@ import { parseBundle, StringBundle, StringEntry } from './models/string-bundle'
 import { BundleFetcher } from './networking/bundle-fetcher'
 import { verifyBundle } from './security/bundle-verifier'
 import { BundleStore, createBundleStore } from './storage/bundle-store'
+import { loadSeedFile } from './storage/seed-reader'
 import { Logger, noopLogger } from './types'
 import IntlMessageFormat from 'intl-messageformat'
 
@@ -48,7 +49,9 @@ export class AirStrings {
 
   private async init(): Promise<void> {
     await this.loadCachedBundle()
+    const seeding = this.seedLocale(this.currentLocale)
     const cdnUrl = await this.bootstrap()
+    await seeding
     this.fetcher = new BundleFetcher(cdnUrl)
     await this.refresh()
   }
@@ -134,6 +137,7 @@ export class AirStrings {
       this.clearStrings()
     }
 
+    await this.seedLocale(bcp47)
     await this.refresh()
   }
 
@@ -260,6 +264,84 @@ export class AirStrings {
     this.applyBundle(bundle)
     this.ready = true
     this.cachedETags.set(this.currentLocale, cached.etag ?? '')
+  }
+
+  private async seedLocale(locale: string): Promise<void> {
+    try {
+      await this.runSeed(locale)
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error))
+      this.logger('error', `Seeding failed for ${locale}: ${err.message}`, { stack: err.stack })
+    }
+  }
+
+  private async runSeed(locale: string): Promise<void> {
+    const { seed, seedDir } = this.config
+    if (seedDir === false) return
+
+    let best: { bundle: StringBundle; json: string } | null = null
+
+    const consider = async (json: string, fromFile: boolean): Promise<void> => {
+      const bundle = parseBundle(json)
+      if (!bundle) {
+        this.rejectSeed(locale, airStringsError('BUNDLE_DECODE_FAILED', 'Failed to parse seed bundle JSON'))
+        return
+      }
+      if (!fromFile && bundle.locale !== locale) return
+
+      const verifyError = await verifyBundle(bundle, this.config.publicKeys)
+      if (verifyError) {
+        this.rejectSeed(locale, verifyError)
+        return
+      }
+      if (bundle.project_id !== this.config.projectId) {
+        this.rejectSeed(locale, airStringsError(
+          'SEED_PROJECT_MISMATCH',
+          `Seed bundle project_id ${bundle.project_id} does not match configured projectId`,
+        ))
+        return
+      }
+      if (bundle.locale !== locale) {
+        this.rejectSeed(locale, airStringsError(
+          'SEED_LOCALE_MISMATCH',
+          `Seed bundle locale ${bundle.locale} does not match requested locale ${locale}`,
+        ))
+        return
+      }
+      if (!best || bundle.revision > best.bundle.revision) {
+        best = { bundle, json }
+      }
+    }
+
+    for (const entry of seed ?? []) {
+      await consider(typeof entry === 'string' ? entry : JSON.stringify(entry), false)
+    }
+
+    if (typeof seedDir === 'string' || seed === undefined) {
+      const json = await loadSeedFile(seedDir, locale)
+      if (json !== null) await consider(json, true)
+    }
+
+    if (!best) return
+    const winner: { bundle: StringBundle; json: string } = best
+    if (winner.bundle.revision <= this.currentRevision) return
+
+    await this.store.save(this.config.projectId, this.config.environmentId, locale, {
+      json: winner.json,
+      etag: null,
+    })
+    this.cachedETags.delete(locale)
+
+    if (locale === this.currentLocale) {
+      this.applyBundle(winner.bundle)
+      this.ready = true
+      this.emitter.emit('strings:updated', { locale, revision: winner.bundle.revision })
+    }
+  }
+
+  private rejectSeed(locale: string, error: AirStringsError): void {
+    this.logger('error', `Seed bundle rejected for ${locale}`, { code: error.code })
+    this.emitter.emit('strings:error', { error })
   }
 
   private applyBundle(bundle: StringBundle): void {
