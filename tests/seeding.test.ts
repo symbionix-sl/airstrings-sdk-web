@@ -258,6 +258,36 @@ describe('bundled fallback seeding', () => {
     expect(logger.mock.calls.filter((c) => c[0] === 'error' || c[0] === 'warn')).toEqual([])
   })
 
+  it('treats a nonexistent seedDir as a silent no-op', async () => {
+    const json = await makeSignedBundleJSON(keys)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ))
+      .mockResolvedValueOnce(new Response(json, {
+        status: 200,
+        headers: { ETag: '"rev:1"' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const logger = vi.fn()
+    const dir = await makeTempDir()
+    const config = makeConfig(keys, { seedDir: join(dir, 'does-not-exist'), logger })
+    const airstrings = new AirStrings(config)
+    const errors = collectErrors(airstrings)
+
+    await airstrings.whenReady()
+
+    expect(airstrings.t('greeting')).toBe('Hello!')
+    expect(airstrings.revision).toBe(1)
+    expect(errors).toEqual([])
+    expect(logger.mock.calls.filter((c) => c[0] === 'error' || c[0] === 'warn')).toEqual([])
+    const stored = await config.store!.load('proj_test12345678', 'env_test12345678', 'en')
+    expect(stored!.json).toBe(json)
+    expect(stored!.etag).toBe('"rev:1"')
+  })
+
   it('seedDir: false disables seeding entirely', async () => {
     const json = await makeSignedBundleJSON(keys)
     const config = makeConfig(keys, { seed: [json], seedDir: false })
