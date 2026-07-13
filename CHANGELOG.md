@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-13
+
+First stable release. The public API is now frozen under Semantic Versioning: no breaking change ships without a major (2.0.0) bump. See the SDK stability and deprecation policy in `docs/contracts/sdk-requirements.md`.
+
+### Changed
+
+- Promoted to 1.0.0. No functional changes from 0.3.0 — this release marks the public API surface as stable.
+
 ## [0.3.0] - 2026-06-10
 
 ### Added
