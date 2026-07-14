@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as ed from '@noble/ed25519'
-import { verifyBundle } from '../src/security/bundle-verifier'
-import { signedContent } from '../src/models/canonical-json'
+import { verifyBundle, verifyExperiments } from '../src/security/bundle-verifier'
+import { signedContent, experimentsSignedContent } from '../src/models/canonical-json'
 import { encode as base64urlEncode } from '../src/security/base64url'
 import { StringBundle } from '../src/models/string-bundle'
 
@@ -196,5 +196,86 @@ describe('BundleVerifier', () => {
     const error = await verifyBundle(bundle, [shortKeyBase64])
     expect(error).not.toBeNull()
     expect(error!.code).toBe('INVALID_KEY_ID_ENCODING')
+  })
+})
+
+const experimentStrings: StringBundle['strings'] = {
+  'checkout.cta': {
+    value: 'Continue',
+    format: 'text',
+    experiment: {
+      id: 'exp_a1b2c3d4e5f6',
+      allocation: { control: 50, variant_a: 50 },
+      variants: { variant_a: 'Continue' },
+    },
+  },
+}
+
+async function makeSignedExperimentsBundle(
+  privateKey: Uint8Array,
+  publicKey: Uint8Array,
+  strings: StringBundle['strings'],
+): Promise<StringBundle> {
+  const unsigned: StringBundle = {
+    format_version: 1,
+    project_id: 'proj_test12345678',
+    locale: 'en',
+    revision: 1,
+    created_at: '2026-02-25T14:30:00Z',
+    key_id: toBase64(publicKey),
+    signature: '',
+    strings,
+  }
+  const experimentsBytes = experimentsSignedContent(unsigned)
+  const experimentsSig = base64urlEncode(await ed.signAsync(experimentsBytes, privateKey))
+  return { ...unsigned, experiments_signature: experimentsSig }
+}
+
+describe('verifyExperiments', () => {
+  it('accepts a validly-signed experiments bundle', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+
+    const bundle = await makeSignedExperimentsBundle(privateKey, publicKey, experimentStrings)
+    expect(await verifyExperiments(bundle, [toBase64(publicKey)])).toBe(true)
+  })
+
+  it('rejects a bundle whose allocation was tampered after signing', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+
+    const bundle = await makeSignedExperimentsBundle(privateKey, publicKey, experimentStrings)
+    const tampered: StringBundle = {
+      ...bundle,
+      strings: {
+        'checkout.cta': {
+          value: 'Continue',
+          format: 'text',
+          experiment: {
+            id: 'exp_a1b2c3d4e5f6',
+            allocation: { control: 10, variant_a: 90 },
+            variants: { variant_a: 'Continue' },
+          },
+        },
+      },
+    }
+    expect(await verifyExperiments(tampered, [toBase64(publicKey)])).toBe(false)
+  })
+
+  it('rejects a bundle with experiment blocks but missing experiments_signature', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+
+    const bundle: StringBundle = {
+      format_version: 1,
+      project_id: 'proj_test12345678',
+      locale: 'en',
+      revision: 1,
+      created_at: '2026-02-25T14:30:00Z',
+      key_id: toBase64(publicKey),
+      signature: '',
+      strings: experimentStrings,
+    }
+    expect(await verifyExperiments(bundle, [toBase64(publicKey)])).toBe(false)
   })
 })

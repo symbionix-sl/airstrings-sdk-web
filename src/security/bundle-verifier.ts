@@ -1,6 +1,6 @@
 import { verifyAsync } from '@noble/ed25519'
 import { StringBundle } from '../models/string-bundle'
-import { signedContent } from '../models/canonical-json'
+import { signedContent, experimentsSignedContent } from '../models/canonical-json'
 import { decode as base64urlDecode } from './base64url'
 import { AirStringsError, airStringsError } from '../airstrings-error'
 
@@ -58,4 +58,28 @@ export async function verifyBundle(
   }
 
   return null
+}
+
+export async function verifyExperiments(
+  bundle: StringBundle,
+  publicKeys: readonly string[],
+): Promise<boolean> {
+  try {
+    if (!publicKeys.includes(bundle.key_id)) return false
+
+    const binary = atob(bundle.key_id)
+    const keyData = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      keyData[i] = binary.charCodeAt(i)
+    }
+    if (keyData.length !== 32) return false
+
+    if (typeof bundle.experiments_signature !== 'string') return false
+    const signatureBytes = base64urlDecode(bundle.experiments_signature)
+    if (!signatureBytes || signatureBytes.length !== 64) return false
+
+    return await verifyAsync(signatureBytes, experimentsSignedContent(bundle), keyData)
+  } catch {
+    return false
+  }
 }

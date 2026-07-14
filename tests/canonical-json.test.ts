@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { signedContent } from '../src/models/canonical-json'
+import { signedContent, experimentsSignedContent } from '../src/models/canonical-json'
 import { StringBundle } from '../src/models/string-bundle'
 
 function toUTF8(bytes: Uint8Array): string {
@@ -170,5 +170,34 @@ describe('CanonicalJSON', () => {
     const result = toUTF8(signedContent(bundle))
     expect(result).toContain('"count":{"format":"icu","value":"{n, plural, one {# item} other {# items}}"}')
     expect(result).toContain('"hello":{"format":"text","value":"Hello"}')
+  })
+
+  it('experiments signed content matches tri-platform fixture byte-for-byte', () => {
+    const bundle: StringBundle = {
+      format_version: 1,
+      project_id: 'proj_x',
+      locale: 'en-US',
+      revision: 42,
+      created_at: '2026-07-14T10:00:00Z',
+      key_id: 'key_prod_01',
+      signature: 'dummy',
+      strings: {
+        'checkout.cta': {
+          value: 'Continue',
+          format: 'text',
+          experiment: {
+            id: 'exp_a1b2c3d4e5f6',
+            allocation: { control: 50, variant_a: 50 },
+            variants: { variant_a: 'Continue' },
+          },
+        },
+      },
+    }
+
+    const result = toUTF8(experimentsSignedContent(bundle))
+    const expected =
+      '{"format_version":1,"project_id":"proj_x","locale":"en-US","revision":42,"created_at":"2026-07-14T10:00:00Z","experiments":{"checkout.cta":{"allocation":{"control":50,"variant_a":50},"id":"exp_a1b2c3d4e5f6","variants":{"variant_a":"Continue"}}}}'
+
+    expect(result).toBe(expected)
   })
 })

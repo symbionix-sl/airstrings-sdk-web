@@ -31,6 +31,42 @@ export function signedContent(bundle: StringBundle): Uint8Array {
   return new TextEncoder().encode(json)
 }
 
+export function experimentsSignedContent(bundle: StringBundle): Uint8Array {
+  let json = '{'
+  json += '"format_version":' + String(bundle.format_version)
+  json += ',"project_id":' + escapeString(bundle.project_id)
+  json += ',"locale":' + escapeString(bundle.locale)
+  json += ',"revision":' + String(bundle.revision)
+  json += ',"created_at":' + escapeString(bundle.created_at)
+  json += ',"experiments":{'
+
+  const experimentKeys = Object.keys(bundle.strings)
+    .filter((key) => bundle.strings[key]!.experiment !== undefined)
+    .sort()
+  for (let i = 0; i < experimentKeys.length; i++) {
+    if (i > 0) json += ','
+    const experiment = bundle.strings[experimentKeys[i]!]!.experiment!
+    json += escapeString(experimentKeys[i]!) + ':{"allocation":{'
+
+    const allocationKeys = Object.keys(experiment.allocation).sort()
+    for (let j = 0; j < allocationKeys.length; j++) {
+      if (j > 0) json += ','
+      json += escapeString(allocationKeys[j]!) + ':' + String(experiment.allocation[allocationKeys[j]!])
+    }
+    json += '},"id":' + escapeString(experiment.id) + ',"variants":{'
+
+    const variantKeys = Object.keys(experiment.variants).sort()
+    for (let j = 0; j < variantKeys.length; j++) {
+      if (j > 0) json += ','
+      json += escapeString(variantKeys[j]!) + ':' + escapeString(experiment.variants[variantKeys[j]!]!)
+    }
+    json += '}}'
+  }
+
+  json += '}}'
+  return new TextEncoder().encode(json)
+}
+
 function escapeString(s: string): string {
   let result = '"'
   for (let i = 0; i < s.length; i++) {
