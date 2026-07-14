@@ -115,6 +115,36 @@ Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a
 
 ---
 
+## String variants (experiments)
+
+Strings can carry A/B variants defined in the dashboard. Give the SDK a stable assignment id and it selects each experiment's variant deterministically — no server round-trip, no local state to persist. The same id always resolves to the same variant.
+
+```ts
+import { AirStrings } from '@airstrings/web'
+
+const airstrings = new AirStrings({
+  organizationId: 'org_xxx',
+  projectId: 'proj_xxx',
+  environmentId: 'env_xxx',
+  publicKeys: ['BASE64_ED25519_PUBLIC_KEY'],
+  locale: 'en',
+})
+
+// A stable per-user id so each user always sees the same variant.
+airstrings.setAssignmentId(currentUser.id)
+
+// Forward every exposure to your own analytics.
+airstrings.on('experiment:exposure', ({ key, experimentId, variant, locale, assignmentId }) => {
+  analytics.track('experiment_exposure', { key, experimentId, variant, locale, assignmentId })
+})
+
+await airstrings.refresh()
+```
+
+Pass `null` to `setAssignmentId` to clear it and fall back to base values. Experiment definitions are covered by the bundle signature and verified before use — if verification fails, the SDK soft-fails to the base strings and never serves unverified experiment content.
+
+---
+
 ## API
 
 ### `new AirStrings(config)`
@@ -138,6 +168,7 @@ Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a
 - **`format(key: string, args?: Record<string, unknown>): string`** — Formats an ICU MessageFormat string. For plain `text` strings, returns the value as-is. Never throws — falls back to the raw pattern on formatting errors, or to the key name if missing.
 - **`refresh(): Promise<void>`** — Forces a bundle refresh from the CDN. Honors ETag/304.
 - **`setLocale(bcp47: string): Promise<void>`** — Switches to a new locale. Loads from cache immediately if available, then refreshes.
+- **`setAssignmentId(id: string | null): void`** — Sets the stable id used to select experiment variants, or clears it with `null` (falls back to base values).
 - **`destroy(): void`** — Removes browser visibility listeners. Call on unmount in long-lived UIs.
 - **`on(event, handler): () => void`** — Subscribe to events. Returns an unsubscribe function.
 
@@ -152,8 +183,17 @@ Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a
 
 ```ts
 type AirStringsEvents = {
-  'strings:updated': { locale: string; revision: number }
-  'strings:error':   { error: AirStringsError }
+  'strings:updated':     { locale: string; revision: number }
+  'strings:error':       { error: AirStringsError }
+  'experiment:exposure': ExposureEvent
+}
+
+type ExposureEvent = {
+  key:          string
+  experimentId: string
+  variant:      string
+  locale:       string
+  assignmentId: string
 }
 ```
 

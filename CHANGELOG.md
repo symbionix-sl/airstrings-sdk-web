@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-14
+
+### Added
+- String Variants: stable, stateless variant selection resolves each experiment's variant deterministically from a caller-supplied assignment id, with no server round-trip and no local state to persist.
+- `setAssignmentId(id: string | null): void` — set (or clear, with `null`) the stable assignment id used to select experiment variants.
+- `experiment:exposure` event carrying `ExposureEvent = { key, experimentId, variant, locale, assignmentId }` (all strings) — emitted when an experiment-backed string is served, so you can forward exposures to your own analytics.
+- Signed-experiments verification: experiment definitions are covered by the bundle's Ed25519 signature and verified before use. On verification failure the SDK soft-fails to the base string values — experiment content is never served unverified, and the public API still never throws.
+
 ## [1.0.0] - 2026-07-13
 
 First stable release. The public API is now frozen under Semantic Versioning: no breaking change ships without a major (2.0.0) bump. See the SDK stability and deprecation policy in `docs/contracts/sdk-requirements.md`.
@@ -48,7 +56,9 @@ First stable release. The public API is now frozen under Semantic Versioning: no
 - Dual ESM + CJS distribution with TypeScript declarations.
 - Node.js 18+ and modern browsers (ES2020+).
 
-[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.2...v0.3.0
 [0.1.1]: https://github.com/symbionix-sl/airstrings-sdk-web/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/symbionix-sl/airstrings-sdk-web/releases/tag/v0.1.0
