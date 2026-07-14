@@ -134,7 +134,7 @@ const airstrings = new AirStrings({
 airstrings.setAssignmentId(currentUser.id)
 
 // Forward every exposure to your own analytics.
-airstrings.on('experiment:exposure', ({ key, experimentId, variant, locale, assignmentId }) => {
+airstrings.onExposure(({ key, experimentId, variant, locale, assignmentId }) => {
   analytics.track('experiment_exposure', { key, experimentId, variant, locale, assignmentId })
 })
 
@@ -171,6 +171,7 @@ Pass `null` to `setAssignmentId` to clear it and fall back to base values. Exper
 - **`setAssignmentId(id: string | null): void`** — Sets the stable id used to select experiment variants, or clears it with `null` (falls back to base values).
 - **`destroy(): void`** — Removes browser visibility listeners. Call on unmount in long-lived UIs.
 - **`on(event, handler): () => void`** — Subscribe to events. Returns an unsubscribe function.
+- **`onExposure(handler): () => void`** — Convenience alias for `on('experiment:exposure', handler)`. Returns an unsubscribe function.
 
 ### Properties
 

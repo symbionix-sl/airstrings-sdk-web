@@ -156,6 +156,10 @@ export class AirStrings {
     return this.emitter.on(event, handler)
   }
 
+  onExposure(handler: (event: ExposureEvent) => void): () => void {
+    return this.on('experiment:exposure', handler)
+  }
+
   setAssignmentId(id: string | null): void {
     this.assignmentId = id
     if (this.recomputeVariants()) {
