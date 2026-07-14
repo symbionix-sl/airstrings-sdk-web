@@ -2,7 +2,7 @@
 
 TypeScript library that fetches, verifies, caches, and exposes Ed25519-signed localized string bundles. Framework-agnostic, zero runtime dependencies, tree-shakeable ESM.
 
-**Platform:** Browser (ES2020+) + Node.js 18+ | **Language:** TypeScript 5.x (strict mode) | **Dependencies:** `@noble/ed25519` (crypto only)
+**Platform:** Browser (ES2020+) + Node.js 18+ | **Language:** TypeScript 5.x (strict mode) | **Dependencies:** `@noble/ed25519`, `@noble/hashes` (crypto only)
 
 ## Code Style
 
@@ -61,7 +61,7 @@ src/
 | `events/` | Nothing | Everything else |
 | `airstrings.ts` | All internal layers | Nothing depends on it |
 
-`@noble/ed25519` is isolated to `security/bundle-verifier.ts`. No other file imports it.
+`@noble/*` crypto is isolated to `security/`. `@noble/ed25519` is imported only by `security/bundle-verifier.ts`; `@noble/hashes` (sha256) only by `security/experiment-selection.ts`. No file outside `security/` imports either.
 
 ### Data Flow
 
