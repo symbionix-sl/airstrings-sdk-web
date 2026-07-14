@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as ed from '@noble/ed25519'
-import { AirStrings } from '../src/airstrings'
+import { AirStrings, ExposureEvent } from '../src/airstrings'
 import { AirStringsConfig } from '../src/airstrings-config'
-import { signedContent } from '../src/models/canonical-json'
+import { signedContent, experimentsSignedContent } from '../src/models/canonical-json'
 import { encode as base64urlEncode } from '../src/security/base64url'
 import { MemoryStore } from '../src/storage/memory-store'
 import { StringBundle } from '../src/models/string-bundle'
@@ -57,6 +57,55 @@ async function makeSignedBundleJSON(
   })
 
   return { json: JSON.stringify(signed), config }
+}
+
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+async function makeExperimentsBundleJSON(
+  privateKey: Uint8Array,
+  publicKey: Uint8Array,
+  opts?: { tamperExpSig?: boolean; omitExpSig?: boolean; revision?: number },
+): Promise<{ json: string; publicKeyBase64: string }> {
+  const publicKeyBase64 = toBase64(publicKey)
+
+  const bundle: StringBundle = {
+    format_version: 1,
+    project_id: 'proj_test12345678',
+    locale: 'en',
+    revision: opts?.revision ?? 1,
+    created_at: '2026-02-25T14:30:00Z',
+    key_id: publicKeyBase64,
+    signature: '',
+    strings: {
+      cta: {
+        value: 'Base CTA',
+        format: 'text',
+        experiment: { id: 'exp_cta', allocation: { treatment: 100 }, variants: { treatment: 'Variant CTA' } },
+      },
+      banner: {
+        value: 'Base Banner',
+        format: 'text',
+        experiment: { id: 'exp_banner', allocation: { control: 100 }, variants: {} },
+      },
+      plain: { value: 'Plain', format: 'text' },
+    },
+  }
+
+  const signature = base64urlEncode(await ed.signAsync(signedContent(bundle), privateKey))
+
+  let experimentsSig: string | undefined
+  if (!opts?.omitExpSig) {
+    const content = opts?.tamperExpSig
+      ? new TextEncoder().encode('tampered')
+      : experimentsSignedContent(bundle)
+    experimentsSig = base64urlEncode(await ed.signAsync(content, privateKey))
+  }
+
+  const signed = experimentsSig
+    ? { ...bundle, signature, experiments_signature: experimentsSig }
+    : { ...bundle, signature }
+
+  return { json: JSON.stringify(signed), publicKeyBase64 }
 }
 
 describe('AirStrings', () => {
@@ -402,5 +451,224 @@ describe('AirStrings', () => {
 
     // Malformed ICU pattern (missing closing brace) — should return raw value
     expect(airstrings.format('bad', { count: 1 })).toBe('{count, plural, one {# item} other {# items}')
+  })
+})
+
+describe('AirStrings experiments', () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('serves the selected variant when experiments are signed and assignmentId is set', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: '"rev:1"' })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Variant CTA')
+    expect(airstrings.t('banner')).toBe('Base Banner')
+    expect(airstrings.t('plain')).toBe('Plain')
+    expect(airstrings.format('cta')).toBe('Variant CTA')
+  })
+
+  it('serves base values and emits no exposure when no assignmentId is set', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Base CTA')
+    expect(airstrings.t('banner')).toBe('Base Banner')
+    await tick()
+    expect(exposures).toHaveLength(0)
+  })
+
+  it('serves base values but still applies the bundle when experiments_signature is tampered', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey, { tamperExpSig: true })
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Base CTA')
+    expect(airstrings.t('plain')).toBe('Plain')
+    expect(airstrings.isReady).toBe(true)
+    await tick()
+    expect(exposures).toHaveLength(0)
+  })
+
+  it('serves base values but still applies the bundle when experiments_signature is absent', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey, { omitExpSig: true })
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Base CTA')
+    expect(airstrings.t('plain')).toBe('Plain')
+    expect(airstrings.isReady).toBe(true)
+    await tick()
+    expect(exposures).toHaveLength(0)
+  })
+
+  it('fires exactly one exposure per (key,experiment,variant,assignment), deduped across reads and re-applies', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    airstrings.t('cta')
+    airstrings.t('cta')
+    airstrings.t('banner')
+    airstrings.t('banner')
+    await tick()
+
+    await airstrings.setLocale('en')
+    airstrings.t('cta')
+    airstrings.t('banner')
+    await tick()
+
+    const cta = exposures.filter((e) => e.key === 'cta')
+    const banner = exposures.filter((e) => e.key === 'banner')
+    expect(cta).toHaveLength(1)
+    expect(cta[0]!.variant).toBe('treatment')
+    expect(cta[0]!.experimentId).toBe('exp_cta')
+    expect(cta[0]!.assignmentId).toBe('user-42')
+    expect(banner).toHaveLength(1)
+    expect(banner[0]!.variant).toBe('control')
+    expect(banner[0]!.experimentId).toBe('exp_banner')
+  })
+
+  it('behaves identically to a pre-variants bundle even with an assignmentId set', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json } = await makeSignedBundleJSON(privateKey, publicKey)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [toBase64(publicKey)], store }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('greeting')).toBe('Hello!')
+    expect(airstrings.t('farewell')).toBe('Goodbye!')
+    await tick()
+    expect(exposures).toHaveLength(0)
+  })
+
+  it('setAssignmentId after load switches the served value and emits strings:updated', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    const store = new MemoryStore()
+    await store.save('proj_test12345678', 'env_test12345678', 'en', { json, etag: null })
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store }))
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Base CTA')
+
+    const updates: { locale: string; revision: number }[] = []
+    airstrings.on('strings:updated', (d) => updates.push(d))
+
+    airstrings.setAssignmentId('user-42')
+    expect(airstrings.t('cta')).toBe('Variant CTA')
+    expect(updates).toHaveLength(1)
+    expect(updates[0]!.locale).toBe('en')
+
+    airstrings.setAssignmentId(null)
+    expect(airstrings.t('cta')).toBe('Base CTA')
+    expect(updates).toHaveLength(2)
+  })
+
+  it('serves variants when the bundle is delivered via the seed path', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    const airstrings = new AirStrings(makeConfig({
+      publicKeys: [publicKeyBase64],
+      store: new MemoryStore(),
+      seed: [json],
+    }))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Variant CTA')
+    expect(airstrings.t('banner')).toBe('Base Banner')
+  })
+
+  it('serves variants and fires an exposure when the bundle arrives via a network refresh', async () => {
+    const privateKey = ed.utils.randomPrivateKey()
+    const publicKey = await ed.getPublicKeyAsync(privateKey)
+    const { json, publicKeyBase64 } = await makeExperimentsBundleJSON(privateKey, publicKey)
+
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ cdn_base_url: 'https://cdn.airstrings.com' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    fetchMock.mockResolvedValueOnce(new Response(json, {
+      status: 200,
+      headers: { ETag: '"rev:1"' },
+    }))
+
+    const airstrings = new AirStrings(makeConfig({ publicKeys: [publicKeyBase64], store: new MemoryStore() }))
+    const exposures: ExposureEvent[] = []
+    airstrings.on('experiment:exposure', (e) => exposures.push(e))
+    airstrings.setAssignmentId('user-42')
+    await airstrings.whenReady()
+
+    expect(airstrings.t('cta')).toBe('Variant CTA')
+    await tick()
+
+    const cta = exposures.filter((e) => e.key === 'cta')
+    expect(cta).toHaveLength(1)
+    expect(cta[0]!.variant).toBe('treatment')
   })
 })

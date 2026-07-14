@@ -3,7 +3,8 @@ import { AirStringsError, airStringsError } from './airstrings-error'
 import { Emitter } from './events/emitter'
 import { parseBundle, StringBundle, StringEntry } from './models/string-bundle'
 import { BundleFetcher } from './networking/bundle-fetcher'
-import { verifyBundle } from './security/bundle-verifier'
+import { verifyBundle, verifyExperiments } from './security/bundle-verifier'
+import { selectVariant } from './security/experiment-selection'
 import { BundleStore, createBundleStore } from './storage/bundle-store'
 import { loadSeedFile } from './storage/seed-reader'
 import { Logger, noopLogger } from './types'
@@ -12,9 +13,38 @@ import IntlMessageFormat from 'intl-messageformat'
 const DEFAULT_CDN_URL = 'https://cdn.airstrings.com'
 const DEFAULT_API_URL = 'https://api.airstrings.com'
 
+export interface ExposureEvent {
+  key: string
+  experimentId: string
+  variant: string
+  locale: string
+  assignmentId: string
+}
+
 export interface AirStringsEvents {
   'strings:updated': { locale: string; revision: number }
   'strings:error': { error: AirStringsError }
+  'experiment:exposure': ExposureEvent
+}
+
+function hasExperiments(bundle: StringBundle): boolean {
+  for (const key of Object.keys(bundle.strings)) {
+    if (bundle.strings[key]!.experiment !== undefined) return true
+  }
+  return false
+}
+
+function sameOverrides(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
+}
+
+function exposureDedupeKey(event: ExposureEvent): string {
+  return event.key + '\n' + event.experimentId + '\n' + event.variant + '\n' + event.assignmentId
 }
 
 export class AirStrings {
@@ -32,6 +62,12 @@ export class AirStrings {
   private ready = false
   private visibilityCleanup: (() => void) | null = null
   private readonly initPromise: Promise<void>
+
+  private assignmentId: string | null = null
+  private experimentsTrusted = false
+  private variantOverrides: Record<string, string> = {}
+  private pendingExposures = new Map<string, ExposureEvent>()
+  private firedExposures = new Set<string>()
 
   constructor(config: AirStringsConfig) {
     this.config = config
@@ -69,7 +105,8 @@ export class AirStrings {
    * Returns the raw localized string for the given key, or the key itself as fallback.
    */
   t(key: string): string {
-    return this.currentStrings[key] ?? key
+    this.drainExposures(key)
+    return this.variantOverrides[key] ?? this.currentStrings[key] ?? key
   }
 
   /**
@@ -83,13 +120,16 @@ export class AirStrings {
     const entry = this.currentEntries[key]
     if (!entry) return key
 
-    if (entry.format === 'text') return entry.value
+    this.drainExposures(key)
+    const value = this.variantOverrides[key] ?? entry.value
+
+    if (entry.format === 'text') return value
 
     try {
-      const msg = new IntlMessageFormat(entry.value, this.currentLocale)
+      const msg = new IntlMessageFormat(value, this.currentLocale)
       return msg.format(args) as string
     } catch {
-      return entry.value
+      return value
     }
   }
 
@@ -116,6 +156,13 @@ export class AirStrings {
     return this.emitter.on(event, handler)
   }
 
+  setAssignmentId(id: string | null): void {
+    this.assignmentId = id
+    if (this.recomputeVariants()) {
+      this.emitter.emit('strings:updated', { locale: this.currentLocale, revision: this.currentRevision })
+    }
+  }
+
   async setLocale(bcp47: string): Promise<void> {
     this.currentLocale = bcp47
 
@@ -129,7 +176,8 @@ export class AirStrings {
           await this.store.delete(this.config.projectId, this.config.environmentId, bcp47)
           this.clearStrings()
         } else {
-          this.applyBundle(bundle)
+          const trusted = await this.computeTrust(bundle)
+          this.applyBundle(bundle, trusted)
           this.cachedETags.set(bcp47, cached.etag ?? '')
         }
       }
@@ -200,7 +248,8 @@ export class AirStrings {
 
       // Only apply if locale hasn't changed during fetch
       if (locale === this.currentLocale) {
-        this.applyBundle(bundle)
+        const trusted = await this.computeTrust(bundle)
+        this.applyBundle(bundle, trusted)
         this.ready = true
         this.emitter.emit('strings:updated', { locale, revision: bundle.revision })
       }
@@ -261,7 +310,8 @@ export class AirStrings {
       return
     }
 
-    this.applyBundle(bundle)
+    const trusted = await this.computeTrust(bundle)
+    this.applyBundle(bundle, trusted)
     this.ready = true
     this.cachedETags.set(this.currentLocale, cached.etag ?? '')
   }
@@ -333,7 +383,8 @@ export class AirStrings {
     this.cachedETags.delete(locale)
 
     if (locale === this.currentLocale) {
-      this.applyBundle(winner.bundle)
+      const trusted = await this.computeTrust(winner.bundle)
+      this.applyBundle(winner.bundle, trusted)
       this.ready = true
       this.emitter.emit('strings:updated', { locale, revision: winner.bundle.revision })
     }
@@ -344,7 +395,13 @@ export class AirStrings {
     this.emitter.emit('strings:error', { error })
   }
 
-  private applyBundle(bundle: StringBundle): void {
+  private async computeTrust(bundle: StringBundle): Promise<boolean> {
+    if (!hasExperiments(bundle)) return false
+    return verifyExperiments(bundle, this.config.publicKeys)
+  }
+
+  private applyBundle(bundle: StringBundle, experimentsTrusted: boolean): void {
+    this.experimentsTrusted = experimentsTrusted
     this.currentEntries = Object.freeze({ ...bundle.strings })
     const values: Record<string, string> = {}
     for (const key of Object.keys(bundle.strings)) {
@@ -352,12 +409,58 @@ export class AirStrings {
     }
     this.currentStrings = Object.freeze(values)
     this.currentRevision = bundle.revision
+    this.recomputeVariants()
+  }
+
+  private recomputeVariants(): boolean {
+    const previous = this.variantOverrides
+    const next: Record<string, string> = {}
+    this.pendingExposures.clear()
+
+    if (this.experimentsTrusted && this.assignmentId !== null) {
+      const assignmentId = this.assignmentId
+      for (const key of Object.keys(this.currentEntries)) {
+        const entry = this.currentEntries[key]!
+        if (!entry.experiment) continue
+        const selection = selectVariant(entry, assignmentId)
+        if (!selection) continue
+        next[key] = selection.value
+        const event: ExposureEvent = {
+          key,
+          experimentId: entry.experiment.id,
+          variant: selection.variant,
+          locale: this.currentLocale,
+          assignmentId,
+        }
+        const dedupeKey = exposureDedupeKey(event)
+        if (!this.firedExposures.has(dedupeKey)) {
+          this.pendingExposures.set(dedupeKey, event)
+        }
+      }
+    }
+
+    this.variantOverrides = next
+    return !sameOverrides(previous, next)
+  }
+
+  private drainExposures(key: string): void {
+    if (this.pendingExposures.size === 0) return
+    for (const [dedupeKey, event] of this.pendingExposures) {
+      if (event.key !== key) continue
+      this.pendingExposures.delete(dedupeKey)
+      this.firedExposures.add(dedupeKey)
+      queueMicrotask(() => this.emitter.emit('experiment:exposure', event))
+    }
   }
 
   private clearStrings(): void {
     this.currentStrings = Object.freeze({})
     this.currentEntries = Object.freeze({})
     this.currentRevision = 0
+    this.experimentsTrusted = false
+    this.variantOverrides = {}
+    this.pendingExposures.clear()
+    this.firedExposures.clear()
   }
 
   private observeVisibility(): void {
