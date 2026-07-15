@@ -156,6 +156,16 @@ export class AirStrings {
     return this.emitter.on(event, handler)
   }
 
+  /**
+   * Subscribe to experiment exposure events. The handler fires at most once
+   * per unique `(key, experimentId, variant, assignmentId)` for the lifetime
+   * of this instance — repeated reads, including a user re-entering the same
+   * screen, do not fire it again. It resets only on a new instance (page
+   * reload / new `AirStrings`) or a changed assignment id. This is *exposure*
+   * (attribute a user to a variant once per session — join to conversions on
+   * `assignmentId`), not impressions; for per-render counts, emit your own
+   * event where you render. Returns an unsubscribe function.
+   */
   onExposure(handler: (event: ExposureEvent) => void): () => void {
     return this.on('experiment:exposure', handler)
   }

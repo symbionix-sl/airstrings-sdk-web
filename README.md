@@ -141,6 +141,8 @@ airstrings.onExposure(({ key, experimentId, variant, locale, assignmentId }) => 
 await airstrings.refresh()
 ```
 
+> **Exposure fires once per session.** `onExposure` is deduped per SDK instance — a user re-entering the same screen won't fire it again; it resets on reload (new instance) or when the assignment id changes. This is deliberate: exposure attributes a user to a variant (join to conversions by `assignmentId`). For per-render impression counts, track your own event where you render.
+
 Pass `null` to `setAssignmentId` to clear it and fall back to base values. Experiment definitions are covered by the bundle signature and verified before use — if verification fails, the SDK soft-fails to the base strings and never serves unverified experiment content.
 
 ---
