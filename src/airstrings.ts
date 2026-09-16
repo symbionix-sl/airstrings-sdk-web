@@ -86,9 +86,9 @@ export class AirStrings {
   private async init(): Promise<void> {
     await this.loadCachedBundle()
     const seeding = this.seedLocale(this.currentLocale)
-    const cdnUrl = await this.bootstrap()
+    const { cdn, fallback } = await this.bootstrap()
     await seeding
-    this.fetcher = new BundleFetcher(cdnUrl)
+    this.fetcher = new BundleFetcher(cdn, fallback)
     await this.refresh()
   }
 
@@ -286,7 +286,8 @@ export class AirStrings {
     }
   }
 
-  private async bootstrap(): Promise<string> {
+  private async bootstrap(): Promise<{ cdn: string; fallback: string | null }> {
+    const defaults = { cdn: DEFAULT_CDN_URL, fallback: null }
     const apiBase = (this.config.apiBaseURL ?? DEFAULT_API_URL).replace(/\/$/, '')
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000)
@@ -294,14 +295,18 @@ export class AirStrings {
       const res = await fetch(`${apiBase}/v1/sdk/bootstrap`, { signal: controller.signal })
       if (!res.ok) {
         this.logger('warn', `Bootstrap returned non-OK status ${res.status}, using default CDN`)
-        return DEFAULT_CDN_URL
+        return defaults
       }
-      const json = await res.json() as { cdn_base_url?: string }
-      return json.cdn_base_url ?? DEFAULT_CDN_URL
+      const json = await res.json() as { cdn_base_url?: unknown; fallback_base_url?: unknown }
+      if (typeof json.cdn_base_url !== 'string' || json.cdn_base_url === '') return defaults
+      const fallback = typeof json.fallback_base_url === 'string' && json.fallback_base_url !== ''
+        ? json.fallback_base_url
+        : null
+      return { cdn: json.cdn_base_url, fallback }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error))
       this.logger('error', `Bootstrap failed: ${err.message}`, { stack: err.stack })
-      return DEFAULT_CDN_URL
+      return defaults
     } finally {
       clearTimeout(timeoutId)
     }
