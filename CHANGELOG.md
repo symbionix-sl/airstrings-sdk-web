@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
+### Changed
+- CDN-unreachable fallback: the SDK reads an optional fallback host from bootstrap (`fallback_base_url`). When one is configured, the first CDN attempt is bounded by a 5s deadline to response headers; on timeout, network error or HTTP 5xx the bundle is fetched once from the fallback host. 4xx, 304 and signature failures never fail over.
+- The host that succeeded stays first for the rest of the session. Without a fallback host, behaviour is unchanged. Signature verification and the public API are unchanged.
+
 ## [1.2.1] - 2026-07-15
 
 ### Changed
