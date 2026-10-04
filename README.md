@@ -3,7 +3,13 @@
 [![npm](https://img.shields.io/npm/v/@airstrings/web.svg)](https://www.npmjs.com/package/@airstrings/web)
 [![license](https://img.shields.io/npm/l/@airstrings/web.svg)](./LICENSE)
 
-The official **AirStrings Web SDK** — a tiny, framework-agnostic TypeScript library that fetches, verifies, caches, and serves Ed25519-signed localized string bundles from the [AirStrings](https://airstrings.com) CDN.
+Change your app's text without a redeploy.
+
+The official **AirStrings Web SDK**: a framework-agnostic TypeScript library that fetches, verifies, caches, and serves Ed25519-signed string bundles from the [AirStrings](https://airstrings.com) CDN.
+
+```bash
+npm install @airstrings/web
+```
 
 - **Signed bundles.** Every bundle is verified with Ed25519 before strings are exposed. Tampered or unsigned content is rejected, never served.
 - **Cache-first.** Bundles are cached in IndexedDB (browser) or memory (Node.js / SSR). Cached bundles are re-verified on every load.
