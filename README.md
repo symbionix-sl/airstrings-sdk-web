@@ -117,7 +117,7 @@ const airstrings = new AirStrings({
 
 Seed bundles are untrusted input: every candidate runs the full Ed25519 verification pipeline, plus `project_id` and locale checks. The highest verified revision wins between cache and seed (ties go to the cache), a winning seed is persisted to the cache, and the network refresh still runs in the background afterwards. A tampered or mismatched seed is rejected with a `strings:error` event and never cached; a missing seed directory or file is a silent no-op.
 
-Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a pre-release step. See the bundled fallback contract (`docs/contracts/bundled-fallback.md` in the AirStrings docs) for the full specification.
+Keep the committed seed fresh by running `airstrings bundles pull` in CI or as a pre-release step. See the [bundled fallback spec](https://docs.airstrings.com/docs/specs/bundled-fallback) for the full specification.
 
 ---
 
